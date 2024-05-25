@@ -1,0 +1,40 @@
+##Metagenome pipeline: (use A-3-JS as an example)
+
+1. Filtering of reads；
+
+##remove adaptor contaminations and low-quality reads
+
+java -jar -Xms20G -Xmx20G trimmomatic-0.36.jar PE -threads 8 -phred33 rawData/A-3-JS_R1.fq.gz rawData/A-3-JS_R2.fq.gz A-3-JS.clip.1.fq.gz A-3-JS.single.R1.fastq.gz A-3-JS.clip.2.fq.gz A-3-JS.single.R2.fastq.gz ILLUMINACLIP:/mnt/sdb/bin/Trimmomatic-0.33/adapters/merge.fa:2:30:10 SLIDINGWINDOW:4:15 MINLEN:75
+
+##remove host contaminations
+
+bwa mem -t 40 -M 00.ref/host.fa A-3-JS.clip.1.fq.gz A-3-JS.clip.2.fq.gz  |awk '$3!="*"' > A-3-JS.host.sam
+perl $Bin/remove-host.pl A-3-JS.host.sam A-3-JS
+
+2. Metagenomic DNA assemblies, gene predictions and construct non-redundant geneset;
+
+megahit -1 01.QC/A-3-JS.clean.1.fq.gz -2 01.QC/A-3-JS.clean.2.fq.gz --min-contig-len 500 -t 40 -o ./A-3-JS
+
+prodigal -a A-3-JS.orf.faa -i /pathway/A-3-JS.contigs -f gff -o A-3-JS.gff -p meta -q -d A-3-JS.orf.ffn
+
+cat $sampleid.orf.ffn >> all.fnn
+
+cd-hit-est -i all.ffn -o uniqGeneSet.ffn -n 9 -c 0.95 -G 0 -M 0 -d 0 -aS 0.9 -r 1 -T 80
+
+transeq -sequence uniqGeneSet.ffn -table 11 -trim -outseq uniqGeneSet.faa
+
+bwa mem -t 40 -M -R \'\@RG\\tID:A-3-JS\\tSM:A-3-JS\\tLB:A-3-JS\\tPL:Illumina\\tPI:500\' uniqGeneSet.ffn A-3-JS.clean.1.fq.gz A-3-JS.clean.2.fq.gz  > A-3-JS.sam
+
+perl $Bin/uniqGene-ProfilebyBwa.pl uniqGeneSet.ffn A-3-JS.sam A-3-JS.sam.abd
+
+3. Taxonomy assignment and KEGG annotation
+
+#NR
+
+diamond blastp -d /mnt/sdb/Database/NR/nr.all -q 06.profile/uniqGeneSet.faa -o uniqGeneSet.m8 -f 6 --evalue 0.00001 -k 10 -t ./ -b 8
+
+#KEGG
+
+source activate kegg
+
+$Bin/kegg/kofamscan/bin/exec_annotation uniqGeneSet.faa -o kegg.txt -p $Bin/kegg/kofamscan/db/profiles/
