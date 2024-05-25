@@ -1,0 +1,37 @@
+##16s rRNA pipeline:
+
+1. Filtering of reads；
+
+java -jar trimmomatic-0.36.jar PE -phred33 -threads 12 raw.R1.fq raw.R2.fq 341F-806R.trim.1.fq 341F-806R.s.1.fq 341F-806R.trim.2.fq 341F-806R.s.2.fq LEADING:0 TRAILING:20 SLIDINGWINDOW:10:20 MINLEN:75 2>341F-806R.trim.log
+
+2. 97% OTU clustering
+
+source activate qiime1
+
+uparse -derep_prefix trim.fasta -output meta_derepprefix.fasta -sizeout 2> pipe.log
+
+uparse -sortbysize meta_derepprefix.fasta -output meta_derepprefix_sorted.fasta -minsize 2 2>> pipe.log
+
+pick_otus.py -i meta_derepprefix_sorted.fasta -o ./ -s 0.97 >>pipe.log
+
+pick_rep_set.py -i meta_derepprefix_sorted_otus.txt -f meta_derepprefix_sorted.fasta -m most_abundant -o qiime_otu_rep.fasta >>pipe.log
+
+uparse -usearch_global trim.fasta -db qiime_otu_rep.fasta -strand plus -id 0.97 -uc map.uc 2>> pipe.log
+
+uc2otuseqids.pl -i map.uc -o otu_seqid.txt
+
+pick_rep_set.py -i otu_seqid.txt -m most_abundant -f trim.fasta -o otu_rep.fasta
+
+make_otu_table.py -i otu_seqid.txt -o otu_table.biom
+
+biom convert -i otu_table.biom -o otu_table.txt --table-type "OTU table" --to-tsv
+
+3. Assigning taxonomy
+
+assign_taxonomy.py -m uclust -i otu_rep.fasta --similarity 0.8 -r silva.16s_bacteria.fasta -t silva.16s_bacteria.tax -o assign_taxonomy
+
+4. Predict function using PICRUSt2
+
+source activate picrust2
+
+picrust2_pipeline.py -i otu_table.biom -s otu_rep.fasta -o PICRUSt2 --processes 20 --stratified --in_traits COG,EC,KO
